@@ -2,7 +2,7 @@
 
 An interactive 3D digital twin built for **Smart India Hackathon (SIH)** — problem statement: *"Safe and Efficient Operation of Mine Vehicles in Fog and Low-Visibility Conditions in Open Cast Iron Ore Mines"* (NMDC Limited, Bailadila Region).
 
-**Live demo:** `https://<your-username>.github.io/<repo-name>/`
+**Live demo:** `https://p3v-cyborg.github.io/mist-safe-digital-twin/`
 
 ## What this is
 
