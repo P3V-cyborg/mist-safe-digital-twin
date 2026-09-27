@@ -1,0 +1,724 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>MIST-SAFE — Digital Twin Command View</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #060a10;
+    --panel: rgba(10,16,22,0.86);
+    --panel-border: rgba(148,178,199,0.16);
+    --text-hi: #dbe6ee;
+    --text-mid: #8fa3b3;
+    --text-lo: #5a6c79;
+    --amber: #f2a93b;
+    --red: #e5484d;
+    --teal: #34d1a6;
+    --blue: #4d9de5;
+  }
+  *{ box-sizing: border-box; }
+  html,body{
+    margin:0; height:100%; background: var(--bg); overflow:hidden;
+    font-family: 'Manrope', sans-serif; color: var(--text-hi);
+  }
+  #canvas-wrap{ position:absolute; inset:0; }
+  canvas{ display:block; }
+
+  .mono{ font-family:'IBM Plex Mono', monospace; }
+
+  /* Top bar */
+  #topbar{
+    position:absolute; top:0; left:0; right:0;
+    display:flex; align-items:center; justify-content:space-between;
+    padding:16px 22px; pointer-events:none;
+  }
+  #brand{ pointer-events:auto; }
+  #brand .title{ font-weight:700; font-size:15px; letter-spacing:0.2px; }
+  #brand .sub{ font-family:'IBM Plex Mono', monospace; font-size:11px; color:var(--text-mid); margin-top:2px; }
+  #status-chip{
+    pointer-events:auto;
+    display:flex; align-items:center; gap:8px;
+    background:var(--panel); border:1px solid var(--panel-border);
+    border-radius:8px; padding:8px 14px;
+    font-family:'IBM Plex Mono', monospace; font-size:12px;
+    backdrop-filter: blur(6px);
+    transition: border-color .3s, color .3s;
+  }
+  #status-chip .dot{ width:8px; height:8px; border-radius:50%; background:var(--teal); box-shadow:0 0 8px var(--teal); }
+  #status-chip.warn .dot{ background:var(--amber); box-shadow:0 0 8px var(--amber); }
+  #status-chip.crit .dot{ background:var(--red); box-shadow:0 0 8px var(--red); animation:pulse 1s infinite; }
+  @keyframes pulse{ 0%,100%{opacity:1} 50%{opacity:.35} }
+
+  /* Left log console */
+  #log-panel{
+    position:absolute; left:18px; top:78px; width:300px; max-height:230px;
+    background:var(--panel); border:1px solid var(--panel-border); border-radius:10px;
+    padding:12px 14px; backdrop-filter: blur(6px); pointer-events:auto;
+    display:flex; flex-direction:column;
+  }
+  #log-panel h3{
+    margin:0 0 8px; font-size:11px; text-transform:uppercase; letter-spacing:1px;
+    color:var(--text-mid); font-weight:600;
+  }
+  #log-list{ overflow-y:auto; display:flex; flex-direction:column-reverse; gap:6px; max-height:180px; }
+  #log-list .line{ font-family:'IBM Plex Mono', monospace; font-size:11.5px; line-height:1.5; color:var(--text-mid); }
+  #log-list .line.hi{ color:var(--text-hi); }
+  #log-list .line.warn{ color:var(--amber); }
+  #log-list .line.crit{ color:var(--red); }
+  #log-list .line .t{ color:var(--text-lo); margin-right:6px; }
+
+  /* Risk table */
+  #risk-panel{
+    position:absolute; right:18px; top:78px; width:290px;
+    background:var(--panel); border:1px solid var(--panel-border); border-radius:10px;
+    padding:12px 14px; backdrop-filter: blur(6px); pointer-events:auto;
+  }
+  #risk-panel h3{ margin:0 0 10px; font-size:11px; text-transform:uppercase; letter-spacing:1px; color:var(--text-mid); font-weight:600; }
+  .route-row{ display:flex; align-items:center; gap:10px; padding:7px 0; border-top:1px solid rgba(148,178,199,0.08); }
+  .route-row:first-of-type{ border-top:none; }
+  .route-tag{ width:22px; height:22px; border-radius:6px; display:flex; align-items:center; justify-content:center; font-family:'IBM Plex Mono',monospace; font-size:11px; font-weight:600; flex-shrink:0; }
+  .route-info{ flex:1; min-width:0; }
+  .route-info .meta{ font-family:'IBM Plex Mono', monospace; font-size:10.5px; color:var(--text-mid); }
+  .route-bar{ height:4px; border-radius:2px; background:rgba(148,178,199,0.12); margin-top:4px; overflow:hidden; }
+  .route-bar > div{ height:100%; border-radius:2px; transition: width .6s ease, background .3s; }
+  .route-decision{ font-family:'IBM Plex Mono', monospace; font-size:10.5px; font-weight:600; text-align:right; width:64px; flex-shrink:0; }
+
+  /* Confidence score card (shown during detection) */
+  #confidence-card{
+    position:absolute; left:50%; top:78px; transform:translateX(-50%) translateY(-14px);
+    width:280px; background:var(--panel); border:1px solid rgba(229,72,77,0.4); border-radius:10px;
+    padding:14px 16px; backdrop-filter: blur(6px); pointer-events:none;
+    opacity:0; transition: opacity .35s, transform .35s;
+  }
+  #confidence-card.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+  #confidence-card h3{ margin:0 0 2px; font-size:12.5px; color:var(--red); font-weight:700; }
+  #confidence-card .sub{ font-family:'IBM Plex Mono', monospace; font-size:10.5px; color:var(--text-mid); margin-bottom:10px; }
+  .conf-row{ display:flex; align-items:center; gap:8px; font-family:'IBM Plex Mono', monospace; font-size:10.5px; color:var(--text-mid); margin-bottom:5px; }
+  .conf-row .lbl{ width:92px; flex-shrink:0; }
+  .conf-row .bar{ flex:1; height:5px; background:rgba(148,178,199,0.14); border-radius:3px; overflow:hidden; }
+  .conf-row .bar > div{ height:100%; width:0%; background:var(--red); border-radius:3px; transition:width .5s ease; }
+  .conf-row .pct{ width:32px; text-align:right; flex-shrink:0; }
+  #conf-total{ margin-top:8px; padding-top:8px; border-top:1px solid rgba(229,72,77,0.25); font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:600; color:var(--red); text-align:center; }
+
+  /* Bottom control bar */
+  #controls{
+    position:absolute; left:18px; bottom:18px; right:18px;
+    display:flex; align-items:flex-end; justify-content:space-between;
+    gap:16px; pointer-events:none;
+  }
+  #control-panel{
+    pointer-events:auto;
+    background:var(--panel); border:1px solid var(--panel-border); border-radius:10px;
+    padding:12px 14px; backdrop-filter: blur(6px);
+    display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+  }
+  button.btn{
+    font-family:'IBM Plex Mono', monospace; font-size:11.5px; font-weight:500;
+    background:rgba(148,178,199,0.08); color:var(--text-hi);
+    border:1px solid var(--panel-border); border-radius:7px;
+    padding:9px 13px; cursor:pointer; transition: background .15s, border-color .15s, color .15s;
+  }
+  button.btn:hover{ background:rgba(148,178,199,0.16); }
+  button.btn:disabled{ opacity:0.35; cursor:not-allowed; }
+  button.btn.danger{ border-color:rgba(229,72,77,0.45); color:#f5b3b5; }
+  button.btn.danger:hover{ background:rgba(229,72,77,0.16); }
+  button.btn.safe{ border-color:rgba(52,209,166,0.4); color:#a9ecd7; }
+  button.btn.safe:hover{ background:rgba(52,209,166,0.14); }
+  .divider{ width:1px; height:24px; background:var(--panel-border); }
+  .fog-group{ display:flex; gap:4px; background:rgba(0,0,0,0.25); padding:3px; border-radius:8px; }
+  .fog-group button.btn{ padding:7px 10px; border:none; background:transparent; }
+  .fog-group button.btn.active{ background:rgba(148,178,199,0.18); color:var(--text-hi); }
+
+  #legend{
+    pointer-events:auto;
+    background:var(--panel); border:1px solid var(--panel-border); border-radius:10px;
+    padding:10px 14px; backdrop-filter: blur(6px);
+    font-family:'IBM Plex Mono', monospace; font-size:10.5px; color:var(--text-mid);
+    display:flex; gap:14px;
+  }
+  #legend .item{ display:flex; align-items:center; gap:6px; }
+  #legend .sw{ width:9px; height:9px; border-radius:2px; }
+
+  #hint{
+    position:absolute; bottom:80px; left:50%; transform:translateX(-50%);
+    font-family:'IBM Plex Mono', monospace; font-size:11px; color:var(--text-lo);
+    pointer-events:none; opacity:0.8; text-align:center;
+  }
+
+  ::-webkit-scrollbar{ width:6px; }
+  ::-webkit-scrollbar-thumb{ background:rgba(148,178,199,0.25); border-radius:3px; }
+</style>
+</head>
+<body>
+
+<div id="canvas-wrap"></div>
+
+<div id="topbar">
+  <div id="brand">
+    <div class="title">MIST-SAFE // Digital Twin Command View</div>
+    <div class="sub">Bailadila Open-Cast Iron Ore Mine — Fog Corridor Sector 4</div>
+  </div>
+  <div id="status-chip" class="mono">
+    <div class="dot"></div>
+    <span id="status-text">ALL ROUTES CLEAR</span>
+  </div>
+</div>
+
+<div id="log-panel">
+  <h3>Incident Log</h3>
+  <div id="log-list"></div>
+</div>
+
+<div id="risk-panel">
+  <h3>Route Risk Assessment</h3>
+  <div id="route-rows"></div>
+</div>
+
+<div id="confidence-card">
+  <h3>⚠ POSSIBLE ACCIDENT DETECTED</h3>
+  <div class="sub">Verifying against sensor fusion model…</div>
+  <div class="conf-row"><span class="lbl">Impact Sensor</span><div class="bar"><div id="cf-1"></div></div><span class="pct">40%</span></div>
+  <div class="conf-row"><span class="lbl">Sudden Stop</span><div class="bar"><div id="cf-2"></div></div><span class="pct">25%</span></div>
+  <div class="conf-row"><span class="lbl">Abnormal Tilt</span><div class="bar"><div id="cf-3"></div></div><span class="pct">20%</span></div>
+  <div class="conf-row"><span class="lbl">No Movement</span><div class="bar"><div id="cf-4"></div></div><span class="pct">15%</span></div>
+  <div id="conf-total">CONFIDENCE — 0%</div>
+</div>
+
+<div id="hint">drag to orbit · scroll to zoom</div>
+
+<div id="controls">
+  <div id="control-panel">
+    <button class="btn danger" id="btn-trigger">Trigger accident — Route A</button>
+    <button class="btn safe" id="btn-clear" disabled>Clear incident</button>
+    <div class="divider"></div>
+    <div class="fog-group mono">
+      <button class="btn" data-fog="clear">Clear</button>
+      <button class="btn active" data-fog="moderate">Moderate fog</button>
+      <button class="btn" data-fog="dense">Dense fog</button>
+    </div>
+    <div class="divider"></div>
+    <button class="btn" id="btn-camera">Reset view</button>
+  </div>
+  <div id="legend">
+    <div class="item"><div class="sw" style="background:#34d1a6"></div>route A</div>
+    <div class="item"><div class="sw" style="background:#4d9de5"></div>route B</div>
+    <div class="item"><div class="sw" style="background:#e5484d"></div>blocked / high risk</div>
+    <div class="item"><div class="sw" style="background:#f2a93b"></div>rerouted vehicle</div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+(function(){
+  "use strict";
+
+  // ---------- Scene setup ----------
+  const wrap = document.getElementById('canvas-wrap');
+  const scene = new THREE.Scene();
+  const bgColor = 0x060a10;
+  scene.background = new THREE.Color(bgColor);
+
+  const camera = new THREE.PerspectiveCamera(45, window.innerWidth/window.innerHeight, 0.1, 2000);
+  const defaultCamPos = new THREE.Vector3(0, 150, 175);
+  camera.position.copy(defaultCamPos);
+  const defaultTarget = new THREE.Vector3(0, -5, 10);
+
+  const renderer = new THREE.WebGLRenderer({antialias:true});
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.shadowMap.enabled = true;
+  wrap.appendChild(renderer.domElement);
+
+  const controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.target.copy(defaultTarget);
+  controls.maxPolarAngle = Math.PI*0.49;
+  controls.minDistance = 60;
+  controls.maxDistance = 420;
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.08;
+
+  // Fog settings
+  const FOG_LEVELS = {
+    clear:    { density: 0.0016, color: 0x334455 },
+    moderate: { density: 0.0055, color: 0x5c6f7d },
+    dense:    { density: 0.011,  color: 0x808f99 }
+  };
+  let fogLevel = 'moderate';
+  scene.fog = new THREE.FogExp2(FOG_LEVELS.moderate.color, FOG_LEVELS.moderate.density);
+
+  // Lighting
+  const hemi = new THREE.HemisphereLight(0x8fa3c8, 0x201812, 0.65);
+  scene.add(hemi);
+  const sun = new THREE.DirectionalLight(0xfff2df, 0.55);
+  sun.position.set(-120, 160, 80);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(1024,1024);
+  sun.shadow.camera.left = -160; sun.shadow.camera.right = 160;
+  sun.shadow.camera.top = 160; sun.shadow.camera.bottom = -160;
+  scene.add(sun);
+
+  // ---------- Terrain (open-cast pit, terraced) ----------
+  const terrainGroup = new THREE.Group();
+  scene.add(terrainGroup);
+
+  const groundMat = new THREE.MeshStandardMaterial({ color: 0x6b5847, roughness:1, metalness:0 });
+  const ground = new THREE.Mesh(new THREE.CircleGeometry(230, 64), groundMat);
+  ground.rotation.x = -Math.PI/2;
+  ground.receiveShadow = true;
+  terrainGroup.add(ground);
+
+  // benched pit terraces (concentric rings, stepped down) nested inside the hairpin loop
+  const pitCenter = [0, -44];
+  const terraceColors = [0x5c4c3d, 0x6b5847, 0x7a6650];
+  for(let i=0;i<3;i++){
+    const r = 26 - i*7;
+    const ring = new THREE.Mesh(
+      new THREE.CylinderGeometry(r, r+6, 2.6, 48, 1, true),
+      new THREE.MeshStandardMaterial({ color: terraceColors[i%terraceColors.length], roughness:1, side:THREE.DoubleSide })
+    );
+    ring.position.set(pitCenter[0], -2.4 - i*2.6, pitCenter[1]);
+    ring.receiveShadow = true;
+    terrainGroup.add(ring);
+    const floor = new THREE.Mesh(new THREE.CircleGeometry(r, 48), new THREE.MeshStandardMaterial({color:0x4a3d31, roughness:1}));
+    floor.rotation.x = -Math.PI/2;
+    floor.position.set(pitCenter[0], -3.7 - i*2.6, pitCenter[1]);
+    terrainGroup.add(floor);
+  }
+
+  // scattered rock/spoil clutter
+  const rockGeo = new THREE.DodecahedronGeometry(1,0);
+  const rockMat = new THREE.MeshStandardMaterial({color:0x554639, roughness:1});
+  for(let i=0;i<40;i++){
+    const rock = new THREE.Mesh(rockGeo, rockMat);
+    const ang = Math.random()*Math.PI*2, rad = 130 + Math.random()*90;
+    rock.position.set(Math.cos(ang)*rad, 0.5, Math.sin(ang)*rad);
+    const s = 1.5 + Math.random()*4;
+    rock.scale.set(s, s*0.7, s);
+    rock.rotation.y = Math.random()*Math.PI;
+    rock.castShadow = true;
+    terrainGroup.add(rock);
+  }
+
+  // ---------- Facility nodes ----------
+  function makeNode(x,z,color,labelColor){
+    const g = new THREE.Group();
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(11,12,1.4,24), new THREE.MeshStandardMaterial({color:0x232b31, roughness:0.8}));
+    base.position.y = 0.7;
+    base.receiveShadow = true;
+    g.add(base);
+    const ring = new THREE.Mesh(new THREE.RingGeometry(9.6,10.6,32), new THREE.MeshBasicMaterial({color, side:THREE.DoubleSide, transparent:true, opacity:0.85}));
+    ring.rotation.x = -Math.PI/2; ring.position.y = 1.45;
+    g.add(ring);
+    g.position.set(x,0,z);
+    return g;
+  }
+  const loadingNode = makeNode(-30, 103, 0x4d9de5);
+  const plantNode = makeNode(30, 103, 0x34d1a6);
+  terrainGroup.add(loadingNode, plantNode);
+
+  function addFacilityBlock(x,z,w,h,d,color){
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), new THREE.MeshStandardMaterial({color, roughness:0.7}));
+    m.position.set(x,h/2,z);
+    m.castShadow = true; m.receiveShadow = true;
+    terrainGroup.add(m);
+    return m;
+  }
+  addFacilityBlock(-30, 116, 18, 10, 9, 0x2b3540);
+  addFacilityBlock(-22, 95, 6, 16, 6, 0x2b3540);
+  addFacilityBlock(30, 116, 18, 13, 15, 0x24363a);
+  addFacilityBlock(22, 95, 8, 20, 8, 0x24363a);
+
+  // ---------- Haul roads: concentric hairpin/U routes (per field-sketch layout) ----------
+  // Two parallel U-shaped haul roads sharing the same loading & plant end-points:
+  // Route A = inner, shorter hairpin, cuts closer to the pit edge (higher risk).
+  // Route B = outer, longer hairpin, wider bend away from the pit edge (safer).
+  function catmull(points){ return new THREE.CatmullRomCurve3(points.map(p=>new THREE.Vector3(p[0], 0.3, p[1]))); }
+
+  function hairpinPoints(topZ, bottomZ, halfWidth, arcSteps){
+    const pts = [];
+    pts.push([-halfWidth, topZ]);
+    pts.push([-halfWidth, bottomZ]);
+    for(let i=0;i<=arcSteps;i++){
+      const theta = Math.PI - (i/arcSteps)*Math.PI;
+      pts.push([halfWidth*Math.cos(theta), bottomZ - halfWidth*Math.sin(theta)]);
+    }
+    pts.push([halfWidth, bottomZ]);
+    pts.push([halfWidth, topZ]);
+    return pts;
+  }
+
+  const curveA = catmull(hairpinPoints(96, -8, 21, 14));   // Route A: inner hairpin
+  const curveB = catmull(hairpinPoints(102, -34, 40, 18)); // Route B: outer hairpin
+
+  function buildRoadMesh(curve, width, color){
+    const pts = curve.getPoints(120);
+    const shape = [];
+    for(let i=0;i<pts.length;i++){
+      const p = pts[i];
+      const next = pts[Math.min(i+1,pts.length-1)];
+      const dir = new THREE.Vector3().subVectors(next,p).normalize();
+      const perp = new THREE.Vector3(-dir.z,0,dir.x).multiplyScalar(width/2);
+      shape.push([p.clone().add(perp), p.clone().sub(perp)]);
+    }
+    const geo = new THREE.BufferGeometry();
+    const verts = [], uvs = [];
+    for(let i=0;i<shape.length-1;i++){
+      const [a1,a2] = shape[i], [b1,b2] = shape[i+1];
+      verts.push(a1.x,a1.y,a1.z, a2.x,a2.y,a2.z, b1.x,b1.y,b1.z);
+      verts.push(a2.x,a2.y,a2.z, b2.x,b2.y,b2.z, b1.x,b1.y,b1.z);
+      const v0=i/shape.length, v1=(i+1)/shape.length;
+      uvs.push(0,v0, 1,v0, 0,v1,  1,v0, 1,v1, 0,v1);
+    }
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(verts,3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs,2));
+    geo.computeVertexNormals();
+    const mat = new THREE.MeshStandardMaterial({ color, roughness:0.95, transparent:true, opacity:0.92 });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.receiveShadow = true;
+    return mesh;
+  }
+
+  const roadA = buildRoadMesh(curveA, 7, 0x34d1a6);
+  const roadB = buildRoadMesh(curveB, 7, 0x4d9de5);
+  roadA.position.y = 0.05; roadB.position.y = 0.02;
+  terrainGroup.add(roadA, roadB);
+
+  // blockage marker (hidden until accident)
+  const blockGroup = new THREE.Group();
+  const accidentT = 0.52;
+  const accidentPos = curveA.getPointAt(accidentT);
+  const blockRing = new THREE.Mesh(new THREE.RingGeometry(6,8,32), new THREE.MeshBasicMaterial({color:0xe5484d, transparent:true, opacity:0.9, side:THREE.DoubleSide}));
+  blockRing.rotation.x = -Math.PI/2; blockRing.position.copy(accidentPos); blockRing.position.y = 0.5;
+  blockGroup.add(blockRing);
+  for(const off of [-1,1]){
+    const cone = new THREE.Mesh(new THREE.ConeGeometry(1.1,3,8), new THREE.MeshStandardMaterial({color:0xe5484d, emissive:0x330000}));
+    cone.position.set(accidentPos.x + off*4, 1.5, accidentPos.z + off*2);
+    blockGroup.add(cone);
+  }
+  blockGroup.visible = false;
+  terrainGroup.add(blockGroup);
+
+  // V2V / V2I relay node — sits between the two hairpins, informs trucks on
+  // both routes of each other's speed & position (per field-sketch "NODE").
+  const commNode = new THREE.Group();
+  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.35,0.35,9,10), new THREE.MeshStandardMaterial({color:0x30363d}));
+  mast.position.y = 4.5;
+  const nodeBall = new THREE.Mesh(new THREE.SphereGeometry(1.15,16,16), new THREE.MeshStandardMaterial({color:0x4d9de5, emissive:0x0e2a44, emissiveIntensity:1}));
+  nodeBall.position.y = 9.3;
+  const nodePulse = new THREE.Mesh(new THREE.RingGeometry(1.6,1.9,32), new THREE.MeshBasicMaterial({color:0x4d9de5, transparent:true, opacity:0.7, side:THREE.DoubleSide}));
+  nodePulse.rotation.x = -Math.PI/2; nodePulse.position.y = 0.4;
+  commNode.add(mast, nodeBall, nodePulse);
+  commNode.position.set(pitCenter[0], 0, pitCenter[1] + 8);
+  terrainGroup.add(commNode);
+
+  // ---------- Vehicles ----------
+  function buildTruck(color){
+    const g = new THREE.Group();
+    const bodyMat = new THREE.MeshStandardMaterial({color, roughness:0.55, metalness:0.15});
+    const cab = new THREE.Mesh(new THREE.BoxGeometry(2.6,2.4,2.8), bodyMat);
+    cab.position.set(0,1.9,2.6); cab.castShadow = true;
+    const bed = new THREE.Mesh(new THREE.BoxGeometry(3,2,5.4), new THREE.MeshStandardMaterial({color:0x30363d, roughness:0.7}));
+    bed.position.set(0,2.2,-1.2); bed.castShadow = true;
+    g.add(cab,bed);
+    const wheelGeo = new THREE.CylinderGeometry(0.85,0.85,0.9,14);
+    const wheelMat = new THREE.MeshStandardMaterial({color:0x0f1113, roughness:0.9});
+    const wheelPos = [[-1.5,0.85,3.2],[1.5,0.85,3.2],[-1.5,0.85,-2.6],[1.5,0.85,-2.6]];
+    for(const [x,y,z] of wheelPos){
+      const w = new THREE.Mesh(wheelGeo, wheelMat);
+      w.rotation.z = Math.PI/2; w.position.set(x,y,z); w.castShadow=true;
+      g.add(w);
+    }
+    const light = new THREE.PointLight(0xfff2c9, 0.9, 22, 2);
+    light.position.set(0,2.6,4.5);
+    g.add(light);
+    const beam = new THREE.Mesh(new THREE.ConeGeometry(3.4,10,16,1,true), new THREE.MeshBasicMaterial({color:0xfff2c9, transparent:true, opacity:0.06, side:THREE.DoubleSide}));
+    beam.rotation.x = Math.PI/2; beam.position.set(0,2.4,10);
+    g.add(beam);
+    g.userData.beacon = null;
+    return g;
+  }
+
+  const TRUCK_COLORS = [0xd8d2c4, 0xc7ceb0, 0xd8d2c4, 0xc7ceb0];
+  const trucks = [];
+  const NUM_TRUCKS = 4;
+  for(let i=0;i<NUM_TRUCKS;i++){
+    const mesh = buildTruck(TRUCK_COLORS[i%TRUCK_COLORS.length]);
+    terrainGroup.add(mesh);
+    trucks.push({
+      mesh,
+      route: 'A',
+      t: (i/NUM_TRUCKS) * 0.9,
+      speed: 0.028 + Math.random()*0.006,
+      stopped: false,
+      rerouted: false,
+      queued: false,
+      transition: null,
+      nodeLogged: false,
+      isAccidentTruck: i === 0
+    });
+  }
+
+  function curveFor(route){ return route === 'A' ? curveA : curveB; }
+
+  function placeTruckAt(truck, t, route){
+    const curve = curveFor(route);
+    const tt = Math.min(Math.max(t,0),0.999);
+    const pos = curve.getPointAt(tt);
+    const tangent = curve.getTangentAt(tt);
+    truck.mesh.position.set(pos.x, 0, pos.z);
+    truck.mesh.rotation.y = Math.atan2(tangent.x, tangent.z);
+  }
+
+  // ---------- HUD state ----------
+  let accidentActive = false;
+  const statusChip = document.getElementById('status-chip');
+  const statusText = document.getElementById('status-text');
+  const logList = document.getElementById('log-list');
+  const btnTrigger = document.getElementById('btn-trigger');
+  const btnClear = document.getElementById('btn-clear');
+  const confCard = document.getElementById('confidence-card');
+  let simClock = 0;
+
+  function fmtTime(){
+    const s = Math.floor(simClock);
+    const mm = String(Math.floor(s/60)).padStart(2,'0');
+    const ss = String(s%60).padStart(2,'0');
+    return mm+':'+ss;
+  }
+
+  function log(msg, cls){
+    const div = document.createElement('div');
+    div.className = 'line ' + (cls||'');
+    div.innerHTML = '<span class="t">['+fmtTime()+']</span>' + msg;
+    logList.prepend(div);
+    while(logList.children.length > 40) logList.removeChild(logList.lastChild);
+  }
+
+  function setStatus(mode, text){
+    statusChip.classList.remove('warn','crit');
+    if(mode==='warn') statusChip.classList.add('warn');
+    if(mode==='crit') statusChip.classList.add('crit');
+    statusText.textContent = text;
+  }
+
+  // Route risk table
+  const ROUTES = [
+    { id:'A', label:'Route A', dist:'5.0 km', time:'15 min', fog:'High', traffic:'High', color:0x34d1a6 },
+    { id:'B', label:'Route B', dist:'6.2 km', time:'19 min', fog:'Low',  traffic:'Med',  color:0x4d9de5 },
+    { id:'C', label:'Route C', dist:'5.5 km', time:'17 min', fog:'V.High', traffic:'Low', color:0xf2a93b }
+  ];
+  const routeRowsEl = document.getElementById('route-rows');
+  function renderRiskTable(){
+    routeRowsEl.innerHTML = '';
+    ROUTES.forEach(r=>{
+      let risk, decision, decisionColor, barColor;
+      if(!accidentActive){
+        risk = r.id==='A' ? 18 : (r.id==='B' ? 35 : 70);
+        decision = r.id==='A' ? 'SELECTED' : (r.id==='B' ? 'STANDBY' : 'AVOID');
+        decisionColor = r.id==='A' ? 'var(--teal)' : (r.id==='B' ? 'var(--text-mid)' : 'var(--amber)');
+        barColor = r.id==='A' ? '#34d1a6' : (r.id==='B' ? '#4d9de5' : '#f2a93b');
+      } else {
+        risk = r.id==='A' ? 100 : (r.id==='B' ? 35 : 70);
+        decision = r.id==='A' ? 'BLOCKED' : (r.id==='B' ? 'SELECTED' : 'AVOID');
+        decisionColor = r.id==='A' ? 'var(--red)' : (r.id==='B' ? 'var(--teal)' : 'var(--amber)');
+        barColor = r.id==='A' ? '#e5484d' : (r.id==='B' ? '#34d1a6' : '#f2a93b');
+      }
+      const row = document.createElement('div');
+      row.className = 'route-row';
+      row.innerHTML = `
+        <div class="route-tag mono" style="background:${'#'+r.color.toString(16).padStart(6,'0')}22; color:#${r.color.toString(16).padStart(6,'0')}; border:1px solid #${r.color.toString(16).padStart(6,'0')}55;">${r.id}</div>
+        <div class="route-info">
+          <div class="meta">${r.dist} · ${r.time} · fog ${r.fog}</div>
+          <div class="route-bar"><div style="width:${risk}%; background:${barColor};"></div></div>
+        </div>
+        <div class="route-decision" style="color:${decisionColor}">${decision}</div>
+      `;
+      routeRowsEl.appendChild(row);
+    });
+  }
+  renderRiskTable();
+
+  // ---------- Accident sequence ----------
+  let confidenceTimer = null;
+  function runConfidenceSequence(onDone){
+    confCard.classList.add('show');
+    const bars = [
+      {id:'cf-1', target:100, delay:100},
+      {id:'cf-2', target:100, delay:500},
+      {id:'cf-3', target:100, delay:950},
+      {id:'cf-4', target:100, delay:1400}
+    ];
+    bars.forEach(b=>{
+      setTimeout(()=>{ document.getElementById(b.id).style.width = b.target+'%'; }, b.delay);
+    });
+    const totalEl = document.getElementById('conf-total');
+    let pct = 0;
+    const interval = setInterval(()=>{
+      pct += 4;
+      if(pct >= 92){ pct = 92; }
+      totalEl.textContent = 'CONFIDENCE — ' + pct + '%';
+    }, 60);
+    setTimeout(()=>{
+      clearInterval(interval);
+      totalEl.textContent = 'CONFIDENCE — 92% · CONFIRMED';
+      if(onDone) onDone();
+    }, 2000);
+  }
+
+  function triggerAccident(){
+    if(accidentActive) return;
+    accidentActive = true;
+    btnTrigger.disabled = true;
+    setStatus('warn', 'POSSIBLE ACCIDENT — VERIFYING');
+    log('Impact spike + sudden stop detected on <b>DUMPER-01</b>, Route A @ 2.6 km mark.', 'warn');
+
+    runConfidenceSequence(()=>{
+      setStatus('crit', 'INCIDENT CONFIRMED — ROUTE A BLOCKED');
+      log('🚨 INCIDENT CONFIRMED — Route A segment marked BLOCKED.', 'crit');
+      log('Digital mine map updated. Broadcasting alert to approaching vehicles.', 'hi');
+      blockGroup.visible = true;
+
+      // freeze the accident truck
+      const accTruck = trucks.find(t=>t.isAccidentTruck);
+      accTruck.stopped = true;
+      accTruck.t = accidentT;
+      placeTruckAt(accTruck, accidentT, 'A');
+
+      log('Rerouting approaching vehicles to <b>Route B</b> as they reach the safety margin.', 'hi');
+      log('Fleet distribution: avoiding single-route congestion on Route B.', '');
+      renderRiskTable();
+      confCard.classList.remove('show');
+      btnClear.disabled = false;
+    });
+  }
+
+  function clearIncident(){
+    accidentActive = false;
+    blockGroup.visible = false;
+    const accTruck = trucks.find(t=>t.isAccidentTruck);
+    accTruck.stopped = false;
+    accTruck.t = accidentT + 0.02;
+    trucks.forEach(truck=>{
+      if(truck.queued){
+        truck.queued = false;
+        truck.stopped = false;
+      }
+    });
+    setStatus('', 'ALL ROUTES CLEAR');
+    log('Incident cleared. Route A reopened. Vehicles resuming default routing.', 'hi');
+    renderRiskTable();
+    btnTrigger.disabled = false;
+    btnClear.disabled = true;
+    document.getElementById('conf-total').textContent = 'CONFIDENCE — 0%';
+    ['cf-1','cf-2','cf-3','cf-4'].forEach(id=>document.getElementById(id).style.width='0%');
+  }
+
+  btnTrigger.addEventListener('click', triggerAccident);
+  btnClear.addEventListener('click', clearIncident);
+
+  document.querySelectorAll('.fog-group button').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      document.querySelectorAll('.fog-group button').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      fogLevel = btn.dataset.fog;
+      const conf = FOG_LEVELS[fogLevel];
+      scene.fog.color.setHex(conf.color);
+      scene.fog.density = conf.density;
+      log('Visibility mode set to <b>'+fogLevel+'</b> fog.', '');
+    });
+  });
+
+  document.getElementById('btn-camera').addEventListener('click', ()=>{
+    camera.position.copy(defaultCamPos);
+    controls.target.copy(defaultTarget);
+  });
+
+  log('MIST-SAFE digital twin online. Monitoring 2 haul routes, ' + NUM_TRUCKS + ' vehicles.', 'hi');
+  log('Sensor fusion nominal — GPS + IMU + radar streams active.', '');
+
+  // ---------- Animation loop ----------
+  const clock = new THREE.Clock();
+  function animate(){
+    requestAnimationFrame(animate);
+    const dt = Math.min(clock.getDelta(), 0.05);
+    simClock += dt;
+
+    trucks.forEach(truck=>{
+      if(truck.stopped){
+        // flashing red beacon effect handled via emissive pulse below
+        return;
+      }
+      // continuously watch for vehicles approaching a blocked segment and
+      // divert them onto Route B well before they reach it — checked every
+      // frame so nothing can slip past the roadblock.
+      if(accidentActive && !truck.isAccidentTruck && truck.route === 'A' && !truck.transition && truck.t < accidentT - 0.06){
+        const fromPos = curveFor('A').getPointAt(truck.t).clone();
+        truck.route = 'B';
+        truck.rerouted = true;
+        truck.transition = { from: fromPos, elapsed: 0, duration: 1.4 };
+        log(`DUMPER-0${trucks.indexOf(truck)+1} diverted to <b>Route B</b> ahead of the blocked segment.`, 'hi');
+      }
+      // safety net: a truck already too close to divert smoothly queues up
+      // behind the blockage instead of driving through the stalled vehicle.
+      if(accidentActive && !truck.isAccidentTruck && truck.route === 'A' && !truck.transition && !truck.queued && truck.t >= accidentT - 0.06 && truck.t < accidentT){
+        truck.stopped = true;
+        truck.queued = true;
+        log(`DUMPER-0${trucks.indexOf(truck)+1} queued behind the blocked segment — too close to divert.`, 'warn');
+        return;
+      }
+      if(truck.transition){
+        truck.transition.elapsed += dt;
+        const a = Math.min(truck.transition.elapsed / truck.transition.duration, 1);
+        truck.t += truck.speed * dt * 60 * 0.016; // keep progressing along param
+        const toPos = curveFor(truck.route).getPointAt(Math.min(truck.t,0.999));
+        const pos = truck.transition.from.clone().lerp(toPos, a);
+        truck.mesh.position.set(pos.x, 0, pos.z);
+        const lookAhead = curveFor(truck.route).getPointAt(Math.min(truck.t+0.01,0.999));
+        truck.mesh.rotation.y = Math.atan2(lookAhead.x-pos.x, lookAhead.z-pos.z);
+        if(a>=1) truck.transition = null;
+      } else {
+        truck.t += truck.speed * dt * 60 * 0.016;
+        if(truck.t >= 1){
+          truck.t = 0;
+          truck.nodeLogged = false;
+          if(!accidentActive) truck.route = 'A';
+        }
+        placeTruckAt(truck, truck.t, truck.route);
+      }
+      // V2V/V2I relay node exchange, near the bottom of the hairpin
+      if(!truck.stopped && truck.t > 0.46 && truck.t < 0.5 && !truck.nodeLogged){
+        truck.nodeLogged = true;
+        const kmh = Math.round(truck.speed * 900);
+        log(`NODE relay — sharing DUMPER-0${trucks.indexOf(truck)+1} speed ${kmh} km/h & position with nearby vehicles.`, '');
+      }
+    });
+
+    const pulseScale = 1 + Math.sin(simClock*3)*0.35;
+    nodePulse.scale.set(pulseScale, pulseScale, 1);
+    nodePulse.material.opacity = 0.75 - Math.sin(simClock*3)*0.3;
+
+    // flashing beacon on stopped accident truck
+    const accTruck = trucks.find(t=>t.isAccidentTruck);
+    if(accTruck && accTruck.stopped){
+      const pulse = (Math.sin(simClock*8)+1)/2;
+      blockRing.material.opacity = 0.5 + pulse*0.5;
+    }
+
+    controls.update();
+    renderer.render(scene, camera);
+  }
+  animate();
+
+  window.addEventListener('resize', ()=>{
+    camera.aspect = window.innerWidth/window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+})();
+</script>
+</body>
+</html>
